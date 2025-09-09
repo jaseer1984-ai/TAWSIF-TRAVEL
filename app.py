@@ -344,115 +344,117 @@ if st.session_state.data_loaded and st.session_state.data_dict:
     # Sidebar filters
     st.sidebar.header("📊 Dashboard Filters")
     
-    # Get date range from data
+    # --------- SAFE DATE PICKER (single date vs range) ----------
     all_dates = []
     for df in data_dict.values():
         if 'Date' in df.columns:
-            all_dates.extend(df['Date'].dropna().tolist())
-    
+            dcol = pd.to_datetime(df['Date'], errors='coerce').dropna()
+            all_dates.extend([d.date() for d in dcol.tolist()])
+
     if all_dates:
-        min_date = min(all_dates).date()
-        max_date = max(all_dates).date()
-        
-        # Date range selector
-        date_range = st.sidebar.date_input(
-            "Select Date Range",
-            value=(max_date - timedelta(days=30), max_date),
-            min_value=min_date,
-            max_value=max_date
-        )
+        min_date = min(all_dates)
+        max_date = max(all_dates)
+
+        default_start = max(min_date, max_date - timedelta(days=30))
+
+        if min_date == max_date:
+            sel = st.sidebar.date_input(
+                "Select Date",
+                value=max_date,
+                min_value=min_date,
+                max_value=max_date,
+                key="single_date"
+            )
+        else:
+            sel = st.sidebar.date_input(
+                "Select Date Range",
+                value=(default_start, max_date),
+                min_value=min_date,
+                max_value=max_date,
+                key="range_date"
+            )
+
+        if isinstance(sel, tuple) and len(sel) == 2:
+            start_date, end_date = sel
+        else:
+            start_date = end_date = sel
     else:
-        date_range = (date.today() - timedelta(days=30), date.today())
-    
+        # No valid dates found → fall back to last 30 days ending today
+        end_date = date.today()
+        start_date = end_date - timedelta(days=30)
+    # -----------------------------------------------------------
+
     # Branch filter
     branches = ['All']
     if 'Tickets_By_Airline' in data_dict and 'Branch' in data_dict['Tickets_By_Airline'].columns:
-        branches.extend(list(data_dict['Tickets_By_Airline']['Branch'].unique()))
-    
+        branches.extend(list(data_dict['Tickets_By_Airline']['Branch'].dropna().unique()))
     selected_branch = st.sidebar.selectbox("Select Branch", branches)
-    
+
     # Filter data based on selections
     filtered_data = {}
-    
     for sheet_name, df in data_dict.items():
-        if 'Date' in df.columns and len(date_range) == 2:
-            start_date, end_date = date_range
-            filtered_df = df[(df['Date'] >= pd.Timestamp(start_date)) & 
-                           (df['Date'] <= pd.Timestamp(end_date))]
-        else:
-            filtered_df = df.copy()
-        
+        filtered_df = df.copy()
+
+        if 'Date' in filtered_df.columns:
+            filtered_df['Date'] = pd.to_datetime(filtered_df['Date'], errors='coerce')
+            mask = (filtered_df['Date'] >= pd.Timestamp(start_date)) & (filtered_df['Date'] <= pd.Timestamp(end_date))
+            filtered_df = filtered_df.loc[mask]
+
         # Apply branch filter
         if selected_branch != 'All' and 'Branch' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['Branch'] == selected_branch]
-        
+
         filtered_data[sheet_name] = filtered_df
     
     # Main dashboard content
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        try:
-            if 'Daily_Summary' in filtered_data and not filtered_data['Daily_Summary'].empty:
-                total_sales = filtered_data['Daily_Summary']['Daily Sales'].sum()
-                avg_daily = total_sales / len(filtered_data['Daily_Summary']) if len(filtered_data['Daily_Summary']) > 0 else 0
-                st.metric(
-                    label="💰 Total Sales",
-                    value=f"SAR {total_sales:,.0f}",
-                    delta=f"{avg_daily:.0f} avg/day"
-                )
-            else:
-                st.metric("💰 Total Sales", "No data")
-        except Exception as e:
-            st.metric("💰 Total Sales", "Error loading")
-            st.error(f"Sales calculation error: {str(e)}")
+        if 'Daily_Summary' in filtered_data and not filtered_data['Daily_Summary'].empty:
+            total_sales = filtered_data['Daily_Summary']['Daily Sales'].sum()
+            avg_daily = total_sales / len(filtered_data['Daily_Summary']) if len(filtered_data['Daily_Summary']) > 0 else 0
+            st.metric(
+                label="💰 Total Sales",
+                value=f"SAR {total_sales:,.0f}",
+                delta=f"{avg_daily:,.0f} avg/day"
+            )
+        else:
+            st.metric("💰 Total Sales", "No data")
     
     with col2:
-        try:
-            if 'Tickets_By_Airline' in filtered_data and not filtered_data['Tickets_By_Airline'].empty:
-                total_tickets = filtered_data['Tickets_By_Airline']['Tickets Issued'].sum()
-                days_count = len(filtered_data['Daily_Summary']) if 'Daily_Summary' in filtered_data and not filtered_data['Daily_Summary'].empty else 1
-                avg_daily_tickets = total_tickets / days_count
-                st.metric(
-                    label="🎫 Total Tickets",
-                    value=f"{total_tickets:,}",
-                    delta=f"{avg_daily_tickets:.0f} avg/day"
-                )
-            else:
-                st.metric("🎫 Total Tickets", "No data")
-        except Exception as e:
-            st.metric("🎫 Total Tickets", "Error loading")
-            st.error(f"Tickets calculation error: {str(e)}")
+        if 'Tickets_By_Airline' in filtered_data and not filtered_data['Tickets_By_Airline'].empty:
+            total_tickets = filtered_data['Tickets_By_Airline']['Tickets Issued'].sum()
+            days_count = max((end_date - start_date).days + 1, 1)
+            avg_daily_tickets = total_tickets / days_count
+            st.metric(
+                label="🎫 Total Tickets",
+                value=f"{int(total_tickets):,}",
+                delta=f"{avg_daily_tickets:,.0f} avg/day"
+            )
+        else:
+            st.metric("🎫 Total Tickets", "No data")
     
     with col3:
-        try:
-            if 'Daily_Summary' in filtered_data and not filtered_data['Daily_Summary'].empty:
-                avg_cash = filtered_data['Daily_Summary']['Cash Balance'].mean()
-                st.metric(
-                    label="💵 Avg Cash Balance",
-                    value=f"SAR {avg_cash:,.0f}",
-                    delta="Daily Average"
-                )
-            else:
-                st.metric("💵 Avg Cash Balance", "No data")
-        except Exception as e:
-            st.metric("💵 Avg Cash Balance", "Error loading")
-            st.error(f"Cash balance calculation error: {str(e)}")
+        if 'Daily_Summary' in filtered_data and not filtered_data['Daily_Summary'].empty:
+            avg_cash = filtered_data['Daily_Summary']['Cash Balance'].mean()
+            st.metric(
+                label="💵 Avg Cash Balance",
+                value=f"SAR {avg_cash:,.0f}",
+                delta="Daily Average"
+            )
+        else:
+            st.metric("💵 Avg Cash Balance", "No data")
     
     with col4:
-        try:
-            if 'Bank_Balances' in filtered_data and not filtered_data['Bank_Balances'].empty:
-                total_bank_balance = filtered_data['Bank_Balances']['Balance'].sum()
-                st.metric(
-                    label="🏦 Total Bank Balance",
-                    value=f"SAR {total_bank_balance:,.0f}",
-                    delta="All Banks"
-                )
-            else:
-                st.metric("🏦 Total Bank Balance", "No data")
-        except Exception as e:
-            st.metric("🏦 Total Bank Balance", "Error loading")
-            st.error(f"Bank balance calculation error: {str(e)}")
+        if 'Bank_Balances' in filtered_data and not filtered_data['Bank_Balances'].empty:
+            total_bank_balance = filtered_data['Bank_Balances']['Balance'].sum()
+            st.metric(
+                label="🏦 Total Bank Balance",
+                value=f"SAR {total_bank_balance:,.0f}",
+                delta="All Banks"
+            )
+        else:
+            st.metric("🏦 Total Bank Balance", "No data")
     
     # Charts section
     st.markdown("---")
@@ -463,9 +465,12 @@ if st.session_state.data_loaded and st.session_state.data_dict:
     with col1:
         st.subheader("📈 Daily Sales Trend")
         if 'Daily_Summary' in filtered_data and not filtered_data['Daily_Summary'].empty:
-            fig_sales = px.line(filtered_data['Daily_Summary'], x='Date', y='Daily Sales', 
-                               title="Daily Sales Over Time",
-                               labels={'Daily Sales': 'Sales (SAR)', 'Date': 'Date'})
+            fig_sales = px.line(
+                filtered_data['Daily_Summary'],
+                x='Date', y='Daily Sales',
+                title="Daily Sales Over Time",
+                labels={'Daily Sales': 'Sales (SAR)', 'Date': 'Date'}
+            )
             fig_sales.update_layout(showlegend=False)
             fig_sales.update_traces(line_color='#2a5298', line_width=3)
             st.plotly_chart(fig_sales, use_container_width=True)
@@ -475,12 +480,14 @@ if st.session_state.data_loaded and st.session_state.data_dict:
     with col2:
         st.subheader("✈️ Airline Performance")
         if 'Airline_Sales' in filtered_data and not filtered_data['Airline_Sales'].empty:
-            airline_summary = filtered_data['Airline_Sales'].groupby('Airline')['Sales'].sum().reset_index()
-            fig_airline = px.bar(airline_summary, x='Airline', y='Sales',
-                                title="Sales by Airline",
-                                labels={'Sales': 'Total Sales (SAR)', 'Airline': 'Airline'},
-                                color='Sales',
-                                color_continuous_scale='Blues')
+            airline_summary = filtered_data['Airline_Sales'].groupby('Airline', dropna=True)['Sales'].sum().reset_index()
+            fig_airline = px.bar(
+                airline_summary, x='Airline', y='Sales',
+                title="Sales by Airline",
+                labels={'Sales': 'Total Sales (SAR)', 'Airline': 'Airline'},
+                color='Sales',
+                color_continuous_scale='Blues'
+            )
             fig_airline.update_layout(showlegend=False, xaxis_tickangle=-45)
             st.plotly_chart(fig_airline, use_container_width=True)
         else:
@@ -492,16 +499,21 @@ if st.session_state.data_loaded and st.session_state.data_dict:
     with col1:
         st.subheader("👥 Top Performing Staff")
         if 'Staff_Sales' in filtered_data and not filtered_data['Staff_Sales'].empty:
-            staff_summary = filtered_data['Staff_Sales'].groupby('Staff').agg({
-                'Sales': 'sum',
-                'Tickets Issued': 'sum'
-            }).reset_index().sort_values('Sales', ascending=False).head(8)
-            
-            fig_staff = px.bar(staff_summary, x='Staff', y='Sales',
-                              title="Sales by Staff Member",
-                              labels={'Sales': 'Total Sales (SAR)', 'Staff': 'Staff Member'},
-                              color='Sales',
-                              color_continuous_scale='Greens')
+            staff_summary = (
+                filtered_data['Staff_Sales']
+                .groupby('Staff', dropna=True)
+                .agg({'Sales': 'sum', 'Tickets Issued': 'sum'})
+                .reset_index()
+                .sort_values('Sales', ascending=False)
+                .head(8)
+            )
+            fig_staff = px.bar(
+                staff_summary, x='Staff', y='Sales',
+                title="Sales by Staff Member",
+                labels={'Sales': 'Total Sales (SAR)', 'Staff': 'Staff Member'},
+                color='Sales',
+                color_continuous_scale='Greens'
+            )
             fig_staff.update_layout(showlegend=False, xaxis_tickangle=-45)
             st.plotly_chart(fig_staff, use_container_width=True)
         else:
@@ -510,10 +522,17 @@ if st.session_state.data_loaded and st.session_state.data_dict:
     with col2:
         st.subheader("🎯 Ticket Distribution by Airline")
         if 'Tickets_By_Airline' in filtered_data and not filtered_data['Tickets_By_Airline'].empty:
-            ticket_summary = filtered_data['Tickets_By_Airline'].groupby('Airline')['Tickets Issued'].sum().reset_index()
-            fig_tickets = px.pie(ticket_summary, values='Tickets Issued', names='Airline',
-                                title="Ticket Distribution",
-                                color_discrete_sequence=px.colors.qualitative.Set3)
+            ticket_summary = (
+                filtered_data['Tickets_By_Airline']
+                .groupby('Airline', dropna=True)['Tickets Issued']
+                .sum()
+                .reset_index()
+            )
+            fig_tickets = px.pie(
+                ticket_summary, values='Tickets Issued', names='Airline',
+                title="Ticket Distribution",
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
             st.plotly_chart(fig_tickets, use_container_width=True)
         else:
             st.info("No ticket data available")
@@ -528,16 +547,20 @@ if st.session_state.data_loaded and st.session_state.data_dict:
             fig_balance = make_subplots(specs=[[{"secondary_y": True}]])
             
             fig_balance.add_trace(
-                go.Scatter(x=filtered_data['Daily_Summary']['Date'], 
-                          y=filtered_data['Daily_Summary']['Cash Balance'], 
-                          name="Cash Balance", line=dict(color='green', width=2)),
+                go.Scatter(
+                    x=filtered_data['Daily_Summary']['Date'], 
+                    y=filtered_data['Daily_Summary']['Cash Balance'], 
+                    name="Cash Balance", line=dict(color='green', width=2)
+                ),
                 secondary_y=False,
             )
             
             fig_balance.add_trace(
-                go.Scatter(x=filtered_data['Daily_Summary']['Date'], 
-                          y=filtered_data['Daily_Summary']['Bank Balance'], 
-                          name="Bank Balance", line=dict(color='blue', width=2)),
+                go.Scatter(
+                    x=filtered_data['Daily_Summary']['Date'], 
+                    y=filtered_data['Daily_Summary']['Bank Balance'], 
+                    name="Bank Balance", line=dict(color='blue', width=2)
+                ),
                 secondary_y=True,
             )
             
@@ -553,12 +576,19 @@ if st.session_state.data_loaded and st.session_state.data_dict:
     with col2:
         st.write("**Bank Balances Distribution**")
         if 'Bank_Balances' in filtered_data and not filtered_data['Bank_Balances'].empty:
-            bank_summary = filtered_data['Bank_Balances'].groupby('Bank')['Balance'].sum().reset_index()
-            fig_banks = px.bar(bank_summary, x='Bank', y='Balance',
-                              title="Balance by Bank",
-                              labels={'Balance': 'Total Balance (SAR)', 'Bank': 'Bank'},
-                              color='Balance',
-                              color_continuous_scale='Oranges')
+            bank_summary = (
+                filtered_data['Bank_Balances']
+                .groupby('Bank', dropna=True)['Balance']
+                .sum()
+                .reset_index()
+            )
+            fig_banks = px.bar(
+                bank_summary, x='Bank', y='Balance',
+                title="Balance by Bank",
+                labels={'Balance': 'Total Balance (SAR)', 'Bank': 'Bank'},
+                color='Balance',
+                color_continuous_scale='Oranges'
+            )
             fig_banks.update_layout(showlegend=False)
             st.plotly_chart(fig_banks, use_container_width=True)
         else:
@@ -583,6 +613,7 @@ if st.session_state.data_loaded and st.session_state.data_dict:
                 format_dict = {}
                 for col in numeric_cols:
                     if 'Sales' in col or 'Balance' in col:
+                        # Show decimals where relevant? using 0 decimals here
                         format_dict[col] = 'SAR {:,.0f}'
                     elif 'Tickets' in col:
                         format_dict[col] = '{:,}'
@@ -603,8 +634,8 @@ if st.session_state.data_loaded and st.session_state.data_dict:
     </div>
     """.format(
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        date_range[0] if len(date_range) == 2 else "All Time",
-        date_range[1] if len(date_range) == 2 else "All Time"
+        start_date.strftime("%Y-%m-%d"),
+        end_date.strftime("%Y-%m-%d")
     ), unsafe_allow_html=True)
 
 else:
