@@ -392,50 +392,67 @@ if st.session_state.data_loaded and st.session_state.data_dict:
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        if 'Daily_Summary' in filtered_data:
-            total_sales = filtered_data['Daily_Summary']['Daily Sales'].sum()
-            avg_daily = total_sales / len(filtered_data['Daily_Summary']) if len(filtered_data['Daily_Summary']) > 0 else 0
-            st.metric(
-                label="💰 Total Sales",
-                value=f"SAR {total_sales:,.0f}",
-                delta=f"{avg_daily:.0f} avg/day"
-            )
-        else:
-            st.metric("💰 Total Sales", "No data")
+        try:
+            if 'Daily_Summary' in filtered_data and not filtered_data['Daily_Summary'].empty:
+                total_sales = filtered_data['Daily_Summary']['Daily Sales'].sum()
+                avg_daily = total_sales / len(filtered_data['Daily_Summary']) if len(filtered_data['Daily_Summary']) > 0 else 0
+                st.metric(
+                    label="💰 Total Sales",
+                    value=f"SAR {total_sales:,.0f}",
+                    delta=f"{avg_daily:.0f} avg/day"
+                )
+            else:
+                st.metric("💰 Total Sales", "No data")
+        except Exception as e:
+            st.metric("💰 Total Sales", "Error loading")
+            st.error(f"Sales calculation error: {str(e)}")
     
     with col2:
-        if 'Tickets_By_Airline' in filtered_data:
-            total_tickets = filtered_data['Tickets_By_Airline']['Tickets Issued'].sum()
-            avg_daily_tickets = total_tickets / len(filtered_data['Daily_Summary']) if 'Daily_Summary' in filtered_data and len(filtered_data['Daily_Summary']) > 0 else 0
-            st.metric(
-                label="🎫 Total Tickets",
-                value=f"{total_tickets:,}",
-                delta=f"{avg_daily_tickets:.0f} avg/day"
-            )
-        else:
-            st.metric("🎫 Total Tickets", "No data")
+        try:
+            if 'Tickets_By_Airline' in filtered_data and not filtered_data['Tickets_By_Airline'].empty:
+                total_tickets = filtered_data['Tickets_By_Airline']['Tickets Issued'].sum()
+                days_count = len(filtered_data['Daily_Summary']) if 'Daily_Summary' in filtered_data and not filtered_data['Daily_Summary'].empty else 1
+                avg_daily_tickets = total_tickets / days_count
+                st.metric(
+                    label="🎫 Total Tickets",
+                    value=f"{total_tickets:,}",
+                    delta=f"{avg_daily_tickets:.0f} avg/day"
+                )
+            else:
+                st.metric("🎫 Total Tickets", "No data")
+        except Exception as e:
+            st.metric("🎫 Total Tickets", "Error loading")
+            st.error(f"Tickets calculation error: {str(e)}")
     
     with col3:
-        if 'Daily_Summary' in filtered_data:
-            avg_cash = filtered_data['Daily_Summary']['Cash Balance'].mean()
-            st.metric(
-                label="💵 Avg Cash Balance",
-                value=f"SAR {avg_cash:,.0f}",
-                delta="Daily Average"
-            )
-        else:
-            st.metric("💵 Avg Cash Balance", "No data")
+        try:
+            if 'Daily_Summary' in filtered_data and not filtered_data['Daily_Summary'].empty:
+                avg_cash = filtered_data['Daily_Summary']['Cash Balance'].mean()
+                st.metric(
+                    label="💵 Avg Cash Balance",
+                    value=f"SAR {avg_cash:,.0f}",
+                    delta="Daily Average"
+                )
+            else:
+                st.metric("💵 Avg Cash Balance", "No data")
+        except Exception as e:
+            st.metric("💵 Avg Cash Balance", "Error loading")
+            st.error(f"Cash balance calculation error: {str(e)}")
     
     with col4:
-        if 'Bank_Balances' in filtered_data:
-            total_bank_balance = filtered_data['Bank_Balances']['Balance'].sum()
-            st.metric(
-                label="🏦 Total Bank Balance",
-                value=f"SAR {total_bank_balance:,.0f}",
-                delta="All Banks"
-            )
-        else:
-            st.metric("🏦 Total Bank Balance", "No data")
+        try:
+            if 'Bank_Balances' in filtered_data and not filtered_data['Bank_Balances'].empty:
+                total_bank_balance = filtered_data['Bank_Balances']['Balance'].sum()
+                st.metric(
+                    label="🏦 Total Bank Balance",
+                    value=f"SAR {total_bank_balance:,.0f}",
+                    delta="All Banks"
+                )
+            else:
+                st.metric("🏦 Total Bank Balance", "No data")
+        except Exception as e:
+            st.metric("🏦 Total Bank Balance", "Error loading")
+            st.error(f"Bank balance calculation error: {str(e)}")
     
     # Charts section
     st.markdown("---")
